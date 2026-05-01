@@ -51,7 +51,8 @@ It helps operators understand machine health and take preventive actions.
 
 ## 📷 Screenshot
 
-![Industrial AI Dashboard](./dashboard.png)
+![Industrial AI Dashboard] <img width="1920" height="891" alt="industrial_AI_Assistance" src="https://github.com/user-attachments/assets/e133c66d-d700-46bc-a901-52611affb0ef" />
+
 
 *Real-time Industrial AI dashboard showing ML prediction, sensor thresholds, and RAG-based assistant.*
 
