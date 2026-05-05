@@ -2,8 +2,14 @@ streamlit
 langchain
 langchain-community
 langchain-groq
+langchain-text-splitters
+langchain-core
 faiss-cpu
 sentence-transformers
 pandas
 python-dotenv
 groq
+numpy
+scikit-learn
+joblib
+beautifulsoup4
