@@ -4,12 +4,13 @@ import streamlit as st
 import joblib
 import numpy as np
 from langchain_community.document_loaders import WebBaseLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 
 # ─────────────────────────────────────────
 # LOAD KEY
@@ -58,7 +59,11 @@ def build_rag_system():
     docs_raw    = loader.load()
     splitter    = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=80)
     docs        = splitter.split_documents(docs_raw)
-    embeddings  = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings  = HuggingFaceEmbeddings(
+        model_name="all-MiniLM-L6-v2",
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": False}
+    )
     vectorstore = FAISS.from_documents(docs, embeddings)
     return vectorstore
 
@@ -77,25 +82,30 @@ def get_qa_chain():
 You are an Industrial Maintenance AI Assistant.
 Use the context to answer the question in 2-3 sentences only.
 Be direct and simple. No bullet points. No lists. No headings.
-
 Context:
 {context}
-
 Question: {question}
-
 Short Answer:
 """
     prompt = PromptTemplate(
         template=prompt_template,
         input_variables=["context", "question"]
     )
-    return RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 4}),
-        chain_type_kwargs={"prompt": prompt},
-        return_source_documents=False
+
+    def format_docs(docs):
+        return "\n\n".join(doc.page_content for doc in docs)
+
+    chain = (
+        {
+            "context": vectorstore.as_retriever(
+                search_kwargs={"k": 4}) | format_docs,
+            "question": RunnablePassthrough()
+        }
+        | prompt
+        | llm
+        | StrOutputParser()
     )
+    return chain
 
 # ─────────────────────────────────────────
 # SESSION STATE
@@ -118,13 +128,11 @@ with st.sidebar:
 """, unsafe_allow_html=True)
     st.divider()
 
-    # ── Sensor Thresholds ──
     st.markdown("**📊 Sensor Thresholds**")
     temp_limit = st.slider("Max Temperature (°C)", 60, 120, 85)
     vib_limit  = st.slider("Max Vibration (mm/s)", 1, 10, 5)
     st.divider()
 
-    # ── Machine Sensor Input ──
     st.markdown("**⚙️ Machine Sensor Input**")
     unit        = st.selectbox("Select Unit", ["Gear Unit 1", "Gear Unit 2", "Gear Unit 3", "Cooling Tower"])
     temperature = st.number_input("🌡️ Temperature (°C)", value=30.0, step=0.5)
@@ -136,7 +144,6 @@ with st.sidebar:
 
     if st.button("🚀 Analyze Machine Status", use_container_width=True):
 
-        # ── Rule Based Status ──
         if temperature > temp_limit and vibration > vib_limit:
             status = "🔴 CRITICAL — Immediate Action Required"
             color  = "error"
@@ -174,7 +181,6 @@ with st.sidebar:
                 "operating conditions in industrial gear units?"
             )
 
-        # ── ML Prediction ──
         if ml_ready:
             input_data  = np.array([[temperature, vibration, load]])
             prediction  = ml_model.predict(input_data)[0]
@@ -185,9 +191,8 @@ with st.sidebar:
             probability = 0
             ml_result   = "ML model not loaded"
 
-        # ── Get AI Answer ──
         qa_chain = get_qa_chain()
-        result   = qa_chain.invoke({"query": query})
+        result   = qa_chain.invoke(query)
 
         st.session_state.analyze_result = {
             "unit":        unit,
@@ -200,7 +205,7 @@ with st.sidebar:
             "vibration":   vibration,
             "load":        load,
             "oil_pressure":oil_pressure,
-            "ai_answer":   result["result"]
+            "ai_answer":   result
         }
         st.rerun()
 
@@ -215,7 +220,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── Show Analyze Result if exists ──
 if st.session_state.analyze_result:
     r = st.session_state.analyze_result
     st.markdown(f"### Analysis: {r['unit']}")
@@ -273,10 +277,11 @@ cols = st.columns(len(example_questions))
 for i, eq in enumerate(example_questions):
     with cols[i]:
         if st.button(eq, key=f"eq_{i}", use_container_width=True):
+            st.session_state.messages = []
             st.session_state.messages.append({"role": "user", "content": eq})
             qa_chain = get_qa_chain()
-            result   = qa_chain.invoke({"query": eq})
-            st.session_state.messages.append({"role": "assistant", "content": result["result"]})
+            result   = qa_chain.invoke(eq)
+            st.session_state.messages.append({"role": "assistant", "content": result})
             st.rerun()
 # ── Chat History ──
 for msg in st.session_state.messages:
@@ -289,8 +294,8 @@ if user_query:
     if groq_api_key:
         st.session_state.messages.append({"role": "user", "content": user_query})
         qa_chain = get_qa_chain()
-        result   = qa_chain.invoke({"query": user_query})
-        st.session_state.messages.append({"role": "assistant", "content": result["result"]})
+        result   = qa_chain.invoke(user_query)
+        st.session_state.messages.append({"role": "assistant", "content": result})
         st.rerun()
     else:
         st.error("❌ Add Groq API Key in .env file")
